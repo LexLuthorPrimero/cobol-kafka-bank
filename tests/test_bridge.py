@@ -12,6 +12,7 @@ class TestBridge(unittest.TestCase):
         cls.inbox = Path(cls.temp_dir) / "inbox"
         cls.processed = Path(cls.temp_dir) / "processed"
         os.environ['ACCOUNTS_FILE'] = str(cls.accounts_file)
+        os.environ['ACCOUNTS_PATH'] = str(cls.accounts_file)
         os.environ['BRIDGE_INPUT_FILE'] = str(cls.input_file)
         os.environ['BRIDGE_INBOX'] = str(cls.inbox)
         os.environ['BRIDGE_PROCESSED'] = str(cls.processed)

@@ -6,12 +6,19 @@ def _get_path(env_var, default):
 
 def run_cobol(program):
     cobol_dir = _get_path('COBOL_DIR', '/app')
+    env = os.environ.copy()
+    # Pasar la ruta del archivo de cuentas al COBOL (si está configurada)
+    if 'ACCOUNTS_PATH' in env:
+        env['ACCOUNTS_PATH'] = env['ACCOUNTS_PATH']
+    else:
+        env['ACCOUNTS_PATH'] = '/app/accounts/ACCOUNTS.DAT'
     return subprocess.run(
         [str(cobol_dir / program)],
-        capture_output=True, text=True, cwd=str(cobol_dir)
+        capture_output=True, text=True, cwd=str(cobol_dir), env=env
     ).stdout.strip()
 
 def actualizar_saldo(tid, monto):
+    """monto viene en centavos (ej. 50000 para $500.00). No se multiplica."""
     accounts = _get_path('ACCOUNTS_FILE', '/app/accounts/ACCOUNTS.DAT')
     try:
         with open(accounts, 'r') as f:
@@ -19,18 +26,17 @@ def actualizar_saldo(tid, monto):
     except FileNotFoundError:
         print(f"[BRIDGE] ERROR: {accounts} no encontrado")
         return
+
     nuevas = []
     for linea in lineas:
         linea = linea.rstrip('\r\n')
-        id_cuenta = linea[:5]
-        if id_cuenta == tid:
-            nombre = linea[5:25].rstrip()
+        if linea[:5] == tid:
             saldo_actual = int(linea[25:34]) if len(linea) >= 34 else 0
             nuevo_saldo = saldo_actual - monto
-            nombre_just = nombre.ljust(20)[:20]
-            linea = f"{tid}{nombre_just}{nuevo_saldo:09d}"
+            linea = f"{tid}{linea[5:25].ljust(20)}{nuevo_saldo:09d}"
             print(f"[BRIDGE] Saldo actualizado: {saldo_actual} -> {nuevo_saldo}")
         nuevas.append(linea + '\n')
+
     with open(accounts, 'w') as f:
         f.writelines(nuevas)
 
