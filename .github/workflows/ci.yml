@@ -17,6 +17,7 @@ jobs:
           cobc -x -o autorizador autorizador.cob
           cobc -x -o procesador_pago procesador_pago.cob
           cobc -x -o actualizador_saldo actualizador_saldo.cob
+          chmod +x autorizador procesador_pago actualizador_saldo
       - name: Crear entorno Docker simulado
         run: |
           sudo mkdir -p /app/accounts
@@ -26,7 +27,7 @@ jobs:
         run: ./test.sh
       - name: Instalar Python
         run: sudo apt-get install -y python3
-      - name: Ejecutar tests Python
+      - name: Ejecutar tests Python (con entorno)
         run: |
           export COBOL_DIR=$(pwd)/cobol
           export ACCOUNTS_FILE=/app/accounts/ACCOUNTS.DAT
