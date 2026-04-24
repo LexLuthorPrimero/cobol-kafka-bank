@@ -1,5 +1,7 @@
 name: COBOL Bridge CI
+
 on: [push, pull_request]
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -9,14 +11,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gnucobol
-      - name: Ejecutar tests COBOL
+      - name: Ejecutar tests COBOL (portable)
         run: ./test.sh
       - name: Instalar Python
         run: sudo apt-get install -y python3
       - name: Ejecutar tests Python
         run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
           cd tests
-          python3 -m unittest test_bridge.py
+          python3 -m pytest test_bridge.py -v || python3 -m unittest test_bridge.py
   linter:
     runs-on: ubuntu-latest
     steps:
