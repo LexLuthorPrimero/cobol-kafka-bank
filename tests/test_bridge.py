@@ -1,4 +1,3 @@
-import os; os.environ.setdefault('COBOL_DIR', '/app')
 import unittest
 import json
 import tempfile

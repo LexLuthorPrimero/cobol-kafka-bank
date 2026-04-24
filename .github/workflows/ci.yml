@@ -11,19 +11,26 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gnucobol
-      - name: Compilar COBOL (necesario para los tests Python)
+      - name: Compilar COBOL
         run: |
           cd cobol
           cobc -x -o autorizador autorizador.cob
           cobc -x -o procesador_pago procesador_pago.cob
           cobc -x -o actualizador_saldo actualizador_saldo.cob
+      - name: Crear entorno Docker simulado
+        run: |
+          sudo mkdir -p /app/accounts
+          sudo cp accounts/ACCOUNTS.DAT /app/accounts/ACCOUNTS.DAT
+          sudo touch /app/trans_input.txt
       - name: Ejecutar tests COBOL
         run: ./test.sh
       - name: Instalar Python
         run: sudo apt-get install -y python3
-      - name: Ejecutar tests Python (con entorno configurado)
+      - name: Ejecutar tests Python
         run: |
-          export COBOL_DIR=$(pwd)/cobol   # apuntar a los binarios compilados
+          export COBOL_DIR=$(pwd)/cobol
+          export ACCOUNTS_FILE=/app/accounts/ACCOUNTS.DAT
+          export BRIDGE_INPUT_FILE=/app/trans_input.txt
           cd tests
           python3 -m unittest test_bridge.py -v
   linter:
