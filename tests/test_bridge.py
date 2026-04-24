@@ -1,3 +1,4 @@
+import os; os.environ.setdefault('COBOL_DIR', '/app')
 import unittest
 import json
 import tempfile
@@ -12,7 +13,6 @@ os.environ['BRIDGE_INBOX'] = str(Path(TEST_DIR) / 'inbox')
 os.environ['BRIDGE_PROCESSED'] = str(Path(TEST_DIR) / 'processed')
 os.environ['BRIDGE_INPUT_FILE'] = str(Path(TEST_DIR) / 'trans_input.txt')
 os.environ['ACCOUNTS_FILE'] = str(Path(TEST_DIR) / 'ACCOUNTS.DAT')
-os.environ['COBOL_DIR'] = '/usr/bin'  # o cualquier ruta donde estén los ejecutables COBOL compilados (para CI se compilan antes)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
