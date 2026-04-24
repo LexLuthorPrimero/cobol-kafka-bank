@@ -1,13 +1,13 @@
 #!/bin/bash
 set -e
-echo "🧪 Suite de pruebas COBOL (entorno portátil)"
+echo "🧪 Suite de pruebas COBOL (entorno CI amigable)"
 
 # 1. Crear directorio de trabajo temporal
 TEST_DIR=$(mktemp -d)
 cd "$TEST_DIR"
 
-# 2. Copiar archivos fuente del proyecto
-cp ~/cobol-kafka-bank/cobol/*.cob .
+# 2. Copiar archivos fuente del repositorio (raíz actual)
+cp "$GITHUB_WORKSPACE/cobol/"*.cob . 2>/dev/null || cp ./cobol/*.cob .
 
 # 3. Ajustar las rutas absolutas a rutas relativas para pruebas
 sed -i "s|ASSIGN TO '/app/accounts/ACCOUNTS\.DAT'|ASSIGN TO 'ACCOUNTS.DAT'|g" *.cob
