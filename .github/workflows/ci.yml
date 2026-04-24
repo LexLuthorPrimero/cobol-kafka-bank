@@ -1,25 +1,30 @@
 name: COBOL Bridge CI
-
 on: [push, pull_request]
-
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Instalar GnuCOBOL y Python
+      - name: Instalar GnuCOBOL
         run: |
           sudo apt-get update
-          sudo apt-get install -y gnucobol python3 python3-pip
-      - name: Compilar COBOL
-        run: |
-          cd cobol
-          cobc -x -o autorizador autorizador.cob
-          cobc -x -o procesador_pago procesador_pago.cob
-          cobc -x -o actualizador_saldo actualizador_saldo.cob
+          sudo apt-get install -y gnucobol
       - name: Ejecutar tests COBOL
         run: ./test.sh
+      - name: Instalar Python
+        run: sudo apt-get install -y python3
       - name: Ejecutar tests Python
         run: |
           cd tests
           python3 -m unittest test_bridge.py
+  linter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Super-Linter (solo Markdown)
+        uses: super-linter/super-linter@v7
+        env:
+          VALIDATE_ALL_CODEBASE: false
+          VALIDATE_MARKDOWN: true
+          DEFAULT_BRANCH: main
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
