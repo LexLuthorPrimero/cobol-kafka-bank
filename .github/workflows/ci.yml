@@ -40,7 +40,7 @@ jobs:
           python-version: '3.11'
 
       - name: Instalar dependencias Python
-        run: pip install -r bridge/requirements.txt flake8
+        run: pip install flake8; test -f bridge/requirements.txt && pip install -r bridge/requirements.txt || true
 
       - name: Lint Python (solo errores reales)
         run: |
