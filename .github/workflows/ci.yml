@@ -1,0 +1,25 @@
+name: COBOL Bridge CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar GnuCOBOL y Python
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnucobol python3 python3-pip
+      - name: Compilar COBOL
+        run: |
+          cd cobol
+          cobc -x -o autorizador autorizador.cob
+          cobc -x -o procesador_pago procesador_pago.cob
+          cobc -x -o actualizador_saldo actualizador_saldo.cob
+      - name: Ejecutar tests COBOL
+        run: ./test.sh
+      - name: Ejecutar tests Python
+        run: |
+          cd tests
+          python3 -m unittest test_bridge.py

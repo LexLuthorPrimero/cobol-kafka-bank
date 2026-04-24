@@ -1,0 +1,46 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PROCESADOR.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT ACCOUNTS-FILE ASSIGN TO '/app/accounts/ACCOUNTS.DAT'
+               ORGANIZATION IS LINE SEQUENTIAL.
+           SELECT INPUT-FILE ASSIGN TO '/app/trans_input.txt'
+               ORGANIZATION IS LINE SEQUENTIAL.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  ACCOUNTS-FILE.
+       01  ACCOUNT-RECORD.
+           05  ACC-ID      PIC 9(5).
+           05  ACC-NAME    PIC X(20).
+           05  ACC-BALANCE PIC 9(7)V99.
+       FD  INPUT-FILE.
+       01  INPUT-RECORD.
+           05  IN-ID       PIC 9(5).
+           05 FILLER       PIC X.
+           05  IN-AMT      PIC 9(7)V99.
+       WORKING-STORAGE SECTION.
+       01  WS-FOUND        PIC X.
+       01  WS-NEW-BALANCE  PIC 9(7)V99.
+       01  WS-TEMP-RECORD  PIC X(32).
+       PROCEDURE DIVISION.
+           OPEN INPUT INPUT-FILE
+           READ INPUT-FILE
+           CLOSE INPUT-FILE
+           MOVE 'N' TO WS-FOUND
+           OPEN INPUT ACCOUNTS-FILE
+           OPEN OUTPUT ACCOUNTS-FILE
+           PERFORM UNTIL WS-FOUND = 'Y'
+               READ ACCOUNTS-FILE INTO WS-TEMP-RECORD
+                   AT END EXIT PERFORM
+               END-READ
+               IF ACC-ID = IN-ID
+                   COMPUTE WS-NEW-BALANCE = ACC-BALANCE - IN-AMT
+                   MOVE WS-NEW-BALANCE TO ACC-BALANCE
+                   MOVE 'Y' TO WS-FOUND
+               END-IF
+               WRITE ACCOUNT-RECORD
+           END-PERFORM
+           CLOSE ACCOUNTS-FILE
+           DISPLAY "PAGO PROCESADO"
+           STOP RUN.

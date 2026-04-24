@@ -1,0 +1,44 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. AUTORIZADOR.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT ACCOUNTS-FILE ASSIGN TO '/app/accounts/ACCOUNTS.DAT'
+               ORGANIZATION IS LINE SEQUENTIAL.
+           SELECT INPUT-FILE ASSIGN TO '/app/trans_input.txt'
+               ORGANIZATION IS LINE SEQUENTIAL.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  ACCOUNTS-FILE.
+       01  ACCOUNT-RECORD.
+           05  ACC-ID      PIC 9(5).
+           05  ACC-NAME    PIC X(20).
+           05  ACC-BALANCE PIC 9(7)V99.
+       FD  INPUT-FILE.
+       01  INPUT-RECORD.
+           05  IN-ID       PIC 9(5).
+           05  FILLER      PIC X.
+           05  IN-AMT      PIC 9(7)V99.
+       WORKING-STORAGE SECTION.
+       01  WS-FOUND        PIC X.
+       01  WS-BALANCE      PIC 9(7)V99.
+       PROCEDURE DIVISION.
+           OPEN INPUT INPUT-FILE
+           READ INPUT-FILE
+           CLOSE INPUT-FILE
+           MOVE 'N' TO WS-FOUND
+           OPEN INPUT ACCOUNTS-FILE
+           PERFORM UNTIL WS-FOUND = 'S'
+               READ ACCOUNTS-FILE AT END EXIT PERFORM END-READ
+               IF ACC-ID = IN-ID
+                   MOVE 'S' TO WS-FOUND
+                   MOVE ACC-BALANCE TO WS-BALANCE
+               END-IF
+           END-PERFORM
+           CLOSE ACCOUNTS-FILE
+           IF WS-FOUND = 'S' AND WS-BALANCE >= IN-AMT
+               DISPLAY "AUTORIZADO"
+           ELSE
+               DISPLAY "RECHAZADO"
+           END-IF
+           STOP RUN.

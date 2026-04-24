@@ -1,0 +1,722 @@
+=== ESTRUCTURA DEL PROYECTO ===
+
+========================================
+ARCHIVO: ./bridge/bridge.py
+========================================
+from kafka import KafkaConsumer, TopicPartition
+import subprocess, json, os
+
+BROKER = os.environ.get("KAFKA_BROKER", "kafka:9092")
+TOPIC = "transacciones"
+COBOL_DIR = "/app/cobol"
+INPUT_FILE = "/app/trans_input.txt"
+
+def run_cobol(program):
+    return subprocess.run(
+        [f"{COBOL_DIR}/{program}"],
+        capture_output=True, text=True
+    ).stdout.strip()
+
+def procesar(data):
+    tid = str(data['id']).zfill(5)                # 5 dígitos
+    monto_entero = int(float(data['monto']) * 100) # pasar a centavos (dos decimales)
+    amt = str(monto_entero).zfill(9)              # 9 dígitos (7 enteros + 2 decimales)
+    # Formato fijo: ID de 5, espacio, monto de 9
+    with open(INPUT_FILE, 'w') as f:
+        f.write(f"{tid} {amt}\n")
+    print(f"Procesando {data}")
+    res = run_cobol("autorizador")
+    print(f"Resultado autorizador: {res}")
+    if res == "AUTORIZADO":
+        run_cobol("procesador_pago")
+        run_cobol("actualizador_saldo")
+        print(f"Transaccion completada para ID {tid}")
+    else:
+        print(f"Transaccion RECHAZADA para ID {tid}")
+
+# Consumir mensajes pendientes (anteriores)
+consumer_old = KafkaConsumer(
+    bootstrap_servers=BROKER,
+    auto_offset_reset='earliest',
+    group_id=None,
+    value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+)
+tp = TopicPartition(TOPIC, 0)
+consumer_old.assign([tp])
+consumer_old.seek_to_beginning(tp)
+print("[BRIDGE] Consumiendo mensajes pendientes...")
+for msg in consumer_old:
+    procesar(msg.value)
+    if consumer_old.poll(timeout_ms=5000) == {}:
+        break
+consumer_old.close()
+
+# Luego esperar nuevas transacciones
+consumer = KafkaConsumer(
+    TOPIC,
+    bootstrap_servers=BROKER,
+    auto_offset_reset='latest',
+    group_id='bridge-final',
+    value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+)
+print("[BRIDGE] Esperando nuevas transacciones...")
+for msg in consumer:
+    procesar(msg.value)
+
+========================================
+ARCHIVO: ./bridge/Dockerfile
+========================================
+FROM python:3.12-slim
+RUN apt-get update && apt-get install -y gnucobol && rm -rf /var/lib/apt/lists/*
+RUN pip install kafka-python
+RUN mkdir -p /app/cobol /app/accounts
+
+# autorizador.cob con depuración
+RUN cat > /app/cobol/autorizador.cob << 'EOF'
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. AUTORIZADOR.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT ACCOUNTS-FILE ASSIGN TO '/app/accounts/ACCOUNTS.DAT'
+               ORGANIZATION IS LINE SEQUENTIAL.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  ACCOUNTS-FILE.
+       01  ACCOUNT-RECORD.
+           05  ACC-ID      PIC 9(5).
+           05  ACC-NAME    PIC X(20).
+           05  ACC-BALANCE PIC 9(7)V99.
+       WORKING-STORAGE SECTION.
+       01  WS-TRANS-ID     PIC 9(5).
+       01  WS-TRANS-AMT    PIC 9(7)V99.
+       01  WS-FOUND        PIC X.
+       01  WS-BALANCE      PIC 9(7)V99.
+       PROCEDURE DIVISION.
+           ACCEPT WS-TRANS-ID FROM COMMAND-LINE
+           ACCEPT WS-TRANS-AMT FROM COMMAND-LINE
+           DISPLAY "ID recibido: " WS-TRANS-ID
+           DISPLAY "Monto recibido: " WS-TRANS-AMT
+           MOVE 'N' TO WS-FOUND
+           OPEN INPUT ACCOUNTS-FILE
+           PERFORM UNTIL WS-FOUND = 'S'
+               READ ACCOUNTS-FILE AT END EXIT PERFORM END-READ
+               DISPLAY "Leyendo cuenta: " ACC-ID " saldo: " ACC-BALANCE
+               IF ACC-ID = WS-TRANS-ID
+                   MOVE 'S' TO WS-FOUND
+                   MOVE ACC-BALANCE TO WS-BALANCE
+               END-IF
+           END-PERFORM
+           CLOSE ACCOUNTS-FILE
+           DISPLAY "Saldo encontrado: " WS-BALANCE
+           IF WS-FOUND = 'S' AND WS-BALANCE >= WS-TRANS-AMT
+               DISPLAY "AUTORIZADO"
+           ELSE
+               DISPLAY "RECHAZADO"
+           END-IF
+           STOP RUN.
+EOF
+
+# procesador_pago.cob (sin cambios)
+RUN cat > /app/cobol/procesador_pago.cob << 'EOF'
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PROCESADOR.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT ACCOUNTS-FILE ASSIGN TO '/app/accounts/ACCOUNTS.DAT'
+               ORGANIZATION IS LINE SEQUENTIAL.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  ACCOUNTS-FILE.
+       01  ACCOUNT-RECORD.
+           05  ACC-ID      PIC 9(5).
+           05  ACC-NAME    PIC X(20).
+           05  ACC-BALANCE PIC 9(7)V99.
+       WORKING-STORAGE SECTION.
+       01  WS-TRANS-ID     PIC 9(5).
+       01  WS-TRANS-AMT    PIC 9(7)V99.
+       01  WS-FOUND        PIC X.
+       01  WS-NEW-BALANCE  PIC 9(7)V99.
+       01  WS-TEMP-RECORD  PIC X(32).
+       PROCEDURE DIVISION.
+           ACCEPT WS-TRANS-ID FROM COMMAND-LINE
+           ACCEPT WS-TRANS-AMT FROM COMMAND-LINE
+           MOVE 'N' TO WS-FOUND
+           OPEN INPUT ACCOUNTS-FILE
+           OPEN OUTPUT ACCOUNTS-FILE
+           PERFORM UNTIL WS-FOUND = 'Y'
+               READ ACCOUNTS-FILE INTO WS-TEMP-RECORD
+                   AT END EXIT PERFORM
+               END-READ
+               IF ACC-ID = WS-TRANS-ID
+                   COMPUTE WS-NEW-BALANCE = ACC-BALANCE - WS-TRANS-AMT
+                   MOVE WS-NEW-BALANCE TO ACC-BALANCE
+                   MOVE 'Y' TO WS-FOUND
+               END-IF
+               WRITE ACCOUNT-RECORD
+           END-PERFORM
+           CLOSE ACCOUNTS-FILE
+           DISPLAY "PAGO PROCESADO"
+           STOP RUN.
+EOF
+
+# actualizador_saldo.cob (sin cambios)
+RUN cat > /app/cobol/actualizador_saldo.cob << 'EOF'
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ACTUALIZADOR.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT LOG-FILE ASSIGN TO '/app/accounts/TRANSACTIONS.LOG'
+               ORGANIZATION IS LINE SEQUENTIAL.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  LOG-FILE.
+       01  LOG-RECORD PIC X(50).
+       PROCEDURE DIVISION.
+           OPEN EXTEND LOG-FILE
+           STRING "Transaccion completada a las " FUNCTION CURRENT-DATE
+               DELIMITED BY SIZE INTO LOG-RECORD
+           END-STRING
+           WRITE LOG-RECORD
+           CLOSE LOG-FILE
+           DISPLAY "LOG ACTUALIZADO"
+           STOP RUN.
+EOF
+
+RUN cd /app/cobol \
+    && cobc -x -o autorizador autorizador.cob \
+    && cobc -x -o procesador_pago procesador_pago.cob \
+    && cobc -x -o actualizador_saldo actualizador_saldo.cob
+
+COPY bridge/bridge.py /app/bridge.py
+WORKDIR /app
+CMD ["python", "bridge.py"]
+
+========================================
+ARCHIVO: ./cobol/actualizador_saldo.cob
+========================================
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. ACTUALIZADOR.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT LOG-FILE ASSIGN TO '/app/accounts/TRANSACTIONS.LOG'
+               ORGANIZATION IS LINE SEQUENTIAL.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  LOG-FILE.
+       01  LOG-RECORD PIC X(50).
+       PROCEDURE DIVISION.
+           OPEN EXTEND LOG-FILE
+           STRING "Transaccion completada a las " FUNCTION CURRENT-DATE
+               DELIMITED BY SIZE INTO LOG-RECORD
+           END-STRING
+           WRITE LOG-RECORD
+           CLOSE LOG-FILE
+           DISPLAY "LOG ACTUALIZADO"
+           STOP RUN.
+
+========================================
+ARCHIVO: ./cobol/autorizador.cob
+========================================
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. AUTORIZADOR.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT ACCOUNTS-FILE ASSIGN TO '/app/accounts/ACCOUNTS.DAT'
+               ORGANIZATION IS LINE SEQUENTIAL.
+           SELECT INPUT-FILE ASSIGN TO '/app/trans_input.txt'
+               ORGANIZATION IS LINE SEQUENTIAL.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  ACCOUNTS-FILE.
+       01  ACCOUNT-RECORD.
+           05  ACC-ID      PIC 9(5).
+           05  ACC-NAME    PIC X(20).
+           05  ACC-BALANCE PIC 9(7)V99.
+       FD  INPUT-FILE.
+       01  INPUT-RECORD.
+           05  IN-ID       PIC 9(5).
+           05  FILLER      PIC X.
+           05  IN-AMT      PIC 9(7)V99.
+       WORKING-STORAGE SECTION.
+       01  WS-FOUND        PIC X.
+       01  WS-BALANCE      PIC 9(7)V99.
+       PROCEDURE DIVISION.
+           OPEN INPUT INPUT-FILE
+           READ INPUT-FILE
+           CLOSE INPUT-FILE
+           MOVE 'N' TO WS-FOUND
+           OPEN INPUT ACCOUNTS-FILE
+           PERFORM UNTIL WS-FOUND = 'S'
+               READ ACCOUNTS-FILE AT END EXIT PERFORM END-READ
+               IF ACC-ID = IN-ID
+                   MOVE 'S' TO WS-FOUND
+                   MOVE ACC-BALANCE TO WS-BALANCE
+               END-IF
+           END-PERFORM
+           CLOSE ACCOUNTS-FILE
+           IF WS-FOUND = 'S' AND WS-BALANCE >= IN-AMT
+               DISPLAY "AUTORIZADO"
+           ELSE
+               DISPLAY "RECHAZADO"
+           END-IF
+           STOP RUN.
+
+========================================
+ARCHIVO: ./cobol/procesador_pago.cob
+========================================
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. PROCESADOR.
+       ENVIRONMENT DIVISION.
+       INPUT-OUTPUT SECTION.
+       FILE-CONTROL.
+           SELECT ACCOUNTS-FILE ASSIGN TO '/app/accounts/ACCOUNTS.DAT'
+               ORGANIZATION IS LINE SEQUENTIAL.
+           SELECT INPUT-FILE ASSIGN TO '/app/trans_input.txt'
+               ORGANIZATION IS LINE SEQUENTIAL.
+       DATA DIVISION.
+       FILE SECTION.
+       FD  ACCOUNTS-FILE.
+       01  ACCOUNT-RECORD.
+           05  ACC-ID      PIC 9(5).
+           05  ACC-NAME    PIC X(20).
+           05  ACC-BALANCE PIC 9(7)V99.
+       FD  INPUT-FILE.
+       01  INPUT-RECORD.
+           05  IN-ID       PIC 9(5).
+           05  FILLER      PIC X.
+           05  IN-AMT      PIC 9(7)V99.
+       WORKING-STORAGE SECTION.
+       01  WS-FOUND        PIC X.
+       01  WS-NEW-BALANCE  PIC 9(7)V99.
+       01  WS-TEMP-RECORD  PIC X(32).
+       PROCEDURE DIVISION.
+           OPEN INPUT INPUT-FILE
+           READ INPUT-FILE
+           CLOSE INPUT-FILE
+           MOVE 'N' TO WS-FOUND
+           OPEN INPUT ACCOUNTS-FILE
+           OPEN OUTPUT ACCOUNTS-FILE
+           PERFORM UNTIL WS-FOUND = 'Y'
+               READ ACCOUNTS-FILE INTO WS-TEMP-RECORD
+                   AT END EXIT PERFORM
+               END-READ
+               IF ACC-ID = IN-ID
+                   COMPUTE WS-NEW-BALANCE = ACC-BALANCE - IN-AMT
+                   MOVE WS-NEW-BALANCE TO ACC-BALANCE
+                   MOVE 'Y' TO WS-FOUND
+               END-IF
+               WRITE ACCOUNT-RECORD
+           END-PERFORM
+           CLOSE ACCOUNTS-FILE
+           DISPLAY "PAGO PROCESADO"
+           STOP RUN.
+
+========================================
+ARCHIVO: ./docker-compose.yml
+========================================
+services:
+  kafka:
+    image: apache/kafka:latest
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+  bridge:
+    build:
+      context: .
+      dockerfile: bridge/Dockerfile
+    depends_on:
+      - kafka
+    volumes:
+      - ./accounts:/app/accounts
+    environment:
+      KAFKA_BROKER: "kafka:9092"
+      ACCOUNTS_FILE: "/app/accounts/ACCOUNTS.DAT"
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    mem_limit: 512m
+    restart: on-failure
+
+volumes:
+  kafka_data:
+
+========================================
+ARCHIVO: ./pdf-zipper/pdf-zipper.py
+========================================
+import os
+import sys
+import argparse
+from fpdf import FPDF
+import textwrap
+from fpdf.enums import XPos, YPos
+from urllib.request import urlretrieve
+
+# Constants for font retrieval
+FONT_URL = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSansMono.ttf"
+FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "DejaVuSansMono.ttf")
+
+
+def ensure_font_exists():
+    """Ensure the DejaVu Sans Mono font is available and supports Unicode."""
+    if not os.path.exists(FONT_PATH):
+        print(f"Downloading font to {FONT_PATH}...")
+        try:
+            urlretrieve(FONT_URL, FONT_PATH)
+            print("Font downloaded successfully!")
+        except Exception as e:
+            print(f"Error downloading font: {e}")
+            print("You need to manually download DejaVuSansMono.ttf and place it in the same directory.")
+            sys.exit(1)
+
+
+class CodePDF(FPDF):
+    def __init__(self, title="Code Collection", margin=10, line_width=110):
+        # Initialize PDF with landscape orientation to support wider lines of code.
+        super().__init__(orientation="L", unit="mm", format="A4")
+
+        self.set_margins(left=margin, top=margin, right=margin)
+        self.set_auto_page_break(auto=True, margin=margin)
+        self.line_width = line_width
+        self.add_page()
+
+        try:
+            self.add_font("DejaVu", "", FONT_PATH, uni=True)  # Enable Unicode support
+            self.set_font("DejaVu", size=8)
+        except Exception as e:
+            print(f"Error adding font: {e}")
+            print("Falling back to Courier")
+            self.set_font("Courier", size=8)
+
+        # Add the title to the first page
+        self.set_font_size(14)
+        self.cell(0, 10, title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.set_font_size(8)
+
+    def write_code_block(self, code: str):
+        """Writes a block of code to the PDF with proper formatting."""
+        line_height = 4
+        lines = code.splitlines()
+
+        for line in lines:
+            if not line.strip():
+                self.cell(0, line_height, "", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                continue
+
+            if len(line) > self.line_width:
+                wrapped_lines = textwrap.wrap(line, width=self.line_width,
+                                              subsequent_indent='    ' if line.startswith(' ') else '')
+                for wrapped_line in wrapped_lines:
+                    self.cell(0, line_height, wrapped_line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            else:
+                self.cell(0, line_height, line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    def write_file(self, path: str, code: str):
+        """Adds a file's content to the PDF."""
+        if self.get_y() > self.h - 40:
+            self.add_page()
+
+        # Add blue header for file paths
+        self.set_fill_color(70, 130, 180)
+        self.set_text_color(255, 255, 255)  # White text on blue background
+        self.cell(0, 7, f"File: {path}", fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.set_text_color(0, 0, 0)  # Reset to black text
+        self.write_code_block(code)
+        self.cell(0, 5, "", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    def insert_folder_tree(self, folder_structure: str):
+        """Insert the folder tree structure into the PDF."""
+        self.add_page()
+        self.set_font("DejaVu", size=8)
+        self.set_text_color(0, 0, 255)  # Blue text for folder structure
+        for line in folder_structure.splitlines():
+            self.cell(0, 5, line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.set_text_color(0, 0, 0)  # Reset to black for other content
+
+
+def generate_folder_tree(directory: str) -> str:
+    """Generate folder tree structure as a string."""
+    folder_structure = ""
+    for root, dirs, files in os.walk(directory):
+        level = root.replace(directory, '').count(os.sep)
+        indent = ' ' * 4 * level  # Visual indentation for hierarchy
+        folder_structure += f"{indent}{os.path.basename(root)}/\n"
+        sub_indent = ' ' * 4 * (level + 1)
+        for file in files:
+            folder_structure += f"{sub_indent}{file}\n"
+    return folder_structure
+
+
+def convert_directory_to_pdf(directory: str, output_path="output.pdf", extensions=None,
+                             title="Code Collection", line_width=110, exclude=None, add_tree=False):
+    """Convert the code directory into a structured PDF."""
+    if extensions is None:
+        extensions = [
+            '.py', '.js', '.ts', '.jsx', '.tsx', '.cpp', '.c', '.h', '.hpp',
+            '.html', '.css', '.java', '.go', '.rs', '.php', '.rb', '.md',
+            '.json', '.yml', '.yaml', '.sh', '.sql', '.xml'
+        ]
+
+    if exclude is None:
+        exclude = []
+
+    script_path = os.path.abspath(__file__)
+    if script_path not in exclude:
+        exclude.append(script_path)
+
+    ensure_font_exists()
+    pdf = CodePDF(title=title, line_width=line_width)
+
+    # Generate the folder tree and optionally insert it
+    if add_tree:
+        try:
+            folder_structure = generate_folder_tree(directory)
+            pdf.insert_folder_tree(folder_structure)
+        except Exception as e:
+            print(f"Error generating folder tree: {e}")
+
+    processed_files = 0
+    for root, _, files in os.walk(directory):
+        for file in sorted(files):
+            if any(file.endswith(ext) for ext in extensions):
+                full_path = os.path.join(root, file)
+                relative_path = os.path.relpath(full_path, directory)
+
+                if full_path in exclude:
+                    print(f"Skipping excluded file: {full_path}")
+                    continue
+
+                try:
+                    with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                        code = f.read()
+                    if len(code) > 100000:
+                        code = code[:50000] + "\n\n... [File truncated due to size] ...\n\n"
+
+                    pdf.write_file(relative_path, code)
+                    processed_files += 1
+                except Exception as e:
+                    print(f"Error processing {relative_path}: {e}")
+
+    try:
+        pdf.output(output_path)
+        print(f"PDF saved to {output_path}")
+    except Exception as e:
+        print(f"Error saving PDF: {e}")
+        sys.exit(1)
+
+    return processed_files
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Convert a code directory to a PDF")
+    parser.add_argument("directory", nargs="?", default=".", help="Directory to convert (default: current directory)")
+    parser.add_argument("-o", "--output", default="code_collection.pdf", help="Output PDF file path")
+    parser.add_argument("-t", "--title", default="Code Collection", help="PDF title")
+    parser.add_argument("-e", "--extensions", help="Comma-separated list of file extensions to include")
+    parser.add_argument("-w", "--width", type=int, default=110, help="Maximum line width in characters")
+    parser.add_argument("-x", "--exclude", help="Comma-separated list of files or patterns to exclude")
+    parser.add_argument("-i", "--image", action="store_true", help="Include folder tree structure in the PDF")
+
+    args = parser.parse_args()
+
+    directory = os.path.abspath(args.directory)
+    if not os.path.isdir(directory):
+        print(f"Error: {directory} is not a directory")
+        sys.exit(1)
+
+    extensions = None
+    if args.extensions:
+        extensions = [ext.strip() if ext.strip().startswith('.') else f'.{ext.strip()}' for ext in args.extensions.split(',')]
+
+    exclude_list = []
+    if args.exclude:
+        exclude_list = [os.path.abspath(os.path.join(directory, path.strip())) for path in args.exclude.split(',')]
+
+    try:
+        processed = convert_directory_to_pdf(
+            directory=directory,
+            output_path=args.output,
+            extensions=extensions,
+            title=args.title,
+            line_width=args.width,
+            exclude=exclude_list,
+            add_tree=args.image
+        )
+        print(f"Successfully processed {processed} files")
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+
+========================================
+ARCHIVO: ./pdf-zipper/README.md
+========================================
+# PDF-Zipper
+
+## Overview
+
+PDF-Zipper is a command-line tool that converts your code project into a formatted PDF document. It's specifically designed to create PDFs that are optimal for AI analysis, code review, or documentation purposes.
+
+## Features
+
+- **Project Directory Conversion**: Transforms all code files in a directory (and subdirectories) into a single PDF.
+- **Code Formatting**: Preserves code indentation and handles long lines with proper wrapping.
+- **Selective File Processing**: Filter files by extension or exclude specific files/directories.
+- **Visual Structure**: Files are clearly separated with headers and consistent formatting.
+- **AI-Friendly Format**: Creates PDFs that are easily digestible by AI assistants for context loading.
+
+## Installation
+
+### Prerequisites
+
+- Python 3.6 or higher.
+- Required Python packages:
+  
+  - `fpdf2`
+  - `pygments`.
+
+### Setup
+
+1. Clone this repository or download the script:
+   ```bash
+   git clone https://github.com/sawilove/pdf-zipper.git
+   cd pdf-zipper
+   ```
+
+2. Install required dependencies:
+   ```bash
+   pip install fpdf2 pygments
+   ```
+
+## Usage
+
+### Basic Usage
+
+```bash
+python pdf-zipper.py [directory]
+```
+
+This will create a `code_collection.pdf` file in the current directory containing all supported code files.
+
+### Advanced Options
+
+```bash
+python pdf-zipper.py [directory] -o output.pdf -t "Project Title" -w 120 -e ".py,.js,.html" -x "node_modules/,venv/" -i
+```
+
+### Command Line Arguments
+
+| Option       | Long Option         | Description                                                      |
+|--------------|---------------------|------------------------------------------------------------------|
+| `directory`  |                     | Directory to convert (default: current directory).               |
+| `-o`         | `--output`          | Output PDF file path (default: `code_collection.pdf`).           |
+| `-t`         | `--title`           | PDF title (default: "Code Collection").                          |
+| `-e`         | `--extensions`      | Comma-separated list of file extensions to include.             |
+| `-w`         | `--width`           | Maximum line width in characters (default: 110).                 |
+| `-x`         | `--exclude`         | Comma-separated list of files or patterns to exclude.           |
+| `-i`         | `--image`           | Include folder tree structure in the PDF.                       |
+
+## Supported File Types
+
+The tool supports most common programming and markup languages including:
+- Python (.py)
+- JavaScript/TypeScript (.js, .ts, .jsx, .tsx)
+- HTML/CSS (.html, .css)
+- C/C++ (.c, .cpp, .h, .hpp)
+- Java (.java)
+- Go (.go)
+- Rust (.rs)
+- PHP (.php)
+- Ruby (.rb)
+- Markdown (.md)
+- Configuration files (.json, .yml, .yaml)
+- Shell scripts (.sh)
+- SQL (.sql)
+- XML (.xml)
+
+## Examples
+
+### Create a PDF of a Python project
+```bash
+python pdf-zipper.py ~/projects/my-python-app -o python-project.pdf -t "My Python Project" -e ".py,.md"
+```
+
+### Export a web project excluding node_modules
+```bash
+python pdf-zipper.py ~/projects/web-app -x "node_modules/,dist/,build/" -e ".js,.html,.css,.jsx"
+```
+
+### Include a folder tree visualization in the PDF
+```bash
+python pdf-zipper.py ~/projects/web-app -o web-app.pdf -i
+```
+
+## Notes
+
+- Very large files (>100KB) will be truncated in the output.
+- The tool automatically downloads a monospace font for best results.
+
+## Troubleshooting
+
+- If you encounter font issues, manually download DejaVuSansMono.ttf and place it in the same directory as the script.
+- For errors with large projects, try excluding unnecessary directories.
+
+## Contributing
+
+Contributions are welcome! Feel free to open an issue or submit a pull request for any improvements or feature requests.
+
+========================================
+ARCHIVO: ./test_bridge.py
+========================================
+from kafka import KafkaProducer, KafkaConsumer
+import json, time
+
+BROKER = 'kafka:9092'
+TOPIC = 'transacciones'
+
+# Producir un mensaje de prueba
+try:
+    producer = KafkaProducer(bootstrap_servers=BROKER,
+                             value_serializer=lambda v: json.dumps(v).encode('utf-8'))
+    producer.send(TOPIC, {'id': 1, 'monto': 500})
+    producer.flush()
+    print("Mensaje enviado correctamente")
+except Exception as e:
+    print(f"Error produciendo: {e}")
+
+# Pequeña pausa
+time.sleep(1)
+
+# Consumir un mensaje
+try:
+    consumer = KafkaConsumer(TOPIC,
+                             bootstrap_servers=BROKER,
+                             auto_offset_reset='earliest',
+                             group_id='test-group-final',
+                             value_deserializer=lambda x: x.decode('utf-8'))
+    print("Esperando mensaje...")
+    for msg in consumer:
+        print(f"Recibido: {msg.value}")
+        break
+    consumer.close()
+except Exception as e:
+    print(f"Error consumiendo: {e}")
+
+=== PROBLEM DESCRIPTION ===
