@@ -1,7 +1,7 @@
 import os, json, subprocess, time, shutil
 from pathlib import Path
 
-# Rutas configurables por variables de entorno (útil para CI y desarrollo local)
+# Rutas configurables por variables de entorno (con defaults para Docker)
 INBOX = Path(os.environ.get('BRIDGE_INBOX', '/app/inbox'))
 PROCESSED = Path(os.environ.get('BRIDGE_PROCESSED', '/app/processed'))
 COBOL_DIR = Path(os.environ.get('COBOL_DIR', '/app'))
@@ -11,7 +11,7 @@ ACCOUNTS_FILE = Path(os.environ.get('ACCOUNTS_FILE', '/app/accounts/ACCOUNTS.DAT
 def run_cobol(program):
     return subprocess.run(
         [str(COBOL_DIR / program)],
-        capture_output=True, text=True
+        capture_output=True, text=True, cwd=str(COBOL_DIR)
     ).stdout.strip()
 
 def actualizar_saldo(tid, monto):
@@ -47,6 +47,7 @@ def procesar_archivo(path: Path):
             print(f"[BRIDGE] Datos incompletos en {path.name}")
             return
 
+        INPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(INPUT_FILE, 'w') as f:
             f.write(f'{tid} {amt:09d}\n')
 
@@ -66,9 +67,8 @@ def procesar_archivo(path: Path):
         import traceback
         traceback.print_exc()
     else:
-        # Solo mover si no hubo excepción
-        if PROCESSED.exists() or PROCESSED.mkdir(parents=True, exist_ok=True):
-            shutil.move(str(path), str(PROCESSED / path.name))
+        PROCESSED.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(path), str(PROCESSED / path.name))
 
 def main_loop():
     INBOX.mkdir(parents=True, exist_ok=True)

@@ -7,19 +7,24 @@ import bridge.bridge as bridge_module
 class TestBridge(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # Usar directorios dentro del workspace del CI (permisos garantizados)
-        cls.workspace = Path(os.environ.get('GITHUB_WORKSPACE', '/home/runner/work/cobol-kafka-bank/cobol-kafka-bank'))
-        cls.accounts_file = cls.workspace / 'accounts' / 'ACCOUNTS.DAT'
-        cls.input_file = cls.workspace / 'trans_input.txt'
-        cls.inbox = cls.workspace / 'inbox_test'
-        cls.processed = cls.workspace / 'processed_test'
+        # Crear directorio temporal único para todas las pruebas
+        cls.temp_dir = tempfile.mkdtemp()
+        cls.accounts_file = Path(cls.temp_dir) / "ACCOUNTS.DAT"
+        cls.input_file = Path(cls.temp_dir) / "trans_input.txt"
+        cls.inbox = Path(cls.temp_dir) / "inbox"
+        cls.processed = Path(cls.temp_dir) / "processed"
         for d in [cls.inbox, cls.processed]:
             d.mkdir(exist_ok=True)
-        # Asegurar que las rutas COBOL apunten a estos paths
+
+        # Configurar las variables de entorno que bridge.py lee
         os.environ['ACCOUNTS_FILE'] = str(cls.accounts_file)
         os.environ['BRIDGE_INPUT_FILE'] = str(cls.input_file)
         os.environ['BRIDGE_INBOX'] = str(cls.inbox)
         os.environ['BRIDGE_PROCESSED'] = str(cls.processed)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.temp_dir)
 
     def setUp(self):
         self.accounts_file.write_text(
@@ -28,20 +33,24 @@ class TestBridge(unittest.TestCase):
             "00003Carlos Lopez        000800000\n"
         )
 
-    def tearDown(self):
-        for d in [self.inbox, self.processed]:
-            for f in d.glob('*'): f.unlink()
-
     def test_actualizar_saldo_valido(self):
         bridge_module.actualizar_saldo("00001", 50000)
-        self.assertIn("001450000", self.accounts_file.read_text())
+        contenido = self.accounts_file.read_text()
+        self.assertIn("001450000", contenido)
 
     def test_actualizar_saldo_insuficiente(self):
         bridge_module.actualizar_saldo("00001", 2000000)
-        self.assertIn("-00500000", self.accounts_file.read_text())
+        contenido = self.accounts_file.read_text()
+        self.assertIn("-00500000", contenido)
 
     def test_procesar_archivo_autorizado(self):
+        """Procesa un JSON de prueba y verifica que el saldo se actualiza."""
         tx = {"id": 2, "monto": 300}
-        (self.inbox / "tx-test.json").write_text(json.dumps(tx))
-        bridge_module.procesar_archivo(self.inbox / "tx-test.json")
-        self.assertIn("001970000", self.accounts_file.read_text())
+        archivo = self.inbox / "tx-test.json"
+        archivo.write_text(json.dumps(tx))
+        bridge_module.procesar_archivo(archivo)
+        contenido = self.accounts_file.read_text()
+        self.assertIn("001970000", contenido)
+
+if __name__ == "__main__":
+    unittest.main()
