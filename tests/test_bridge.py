@@ -1,4 +1,4 @@
-import unittest, json, tempfile, shutil, os, sys
+import unittest, tempfile, shutil, os, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import bridge.bridge as bridge_module
