@@ -1,14 +1,18 @@
 import os, json, subprocess, time, shutil
 from pathlib import Path
 
-INBOX     = Path("/app/inbox")
-PROCESSED = Path("/app/processed")
-COBOL_DIR = "/app"
-INPUT_FILE = "/app/trans_input.txt"
-ACCOUNTS_FILE = os.environ.get('ACCOUNTS_FILE', '/app/accounts/ACCOUNTS.DAT')
+# Rutas configurables por variables de entorno (útil para CI y desarrollo local)
+INBOX = Path(os.environ.get('BRIDGE_INBOX', '/app/inbox'))
+PROCESSED = Path(os.environ.get('BRIDGE_PROCESSED', '/app/processed'))
+COBOL_DIR = Path(os.environ.get('COBOL_DIR', '/app'))
+INPUT_FILE = Path(os.environ.get('BRIDGE_INPUT_FILE', '/app/trans_input.txt'))
+ACCOUNTS_FILE = Path(os.environ.get('ACCOUNTS_FILE', '/app/accounts/ACCOUNTS.DAT'))
 
 def run_cobol(program):
-    return subprocess.run([f'{COBOL_DIR}/{program}'], capture_output=True, text=True).stdout.strip()
+    return subprocess.run(
+        [str(COBOL_DIR / program)],
+        capture_output=True, text=True
+    ).stdout.strip()
 
 def actualizar_saldo(tid, monto):
     try:
@@ -21,14 +25,11 @@ def actualizar_saldo(tid, monto):
     nuevas = []
     for linea in lineas:
         linea = linea.rstrip('\r\n')
-        # Extraer ID (primeros 5 caracteres)
         id_cuenta = linea[:5]
         if id_cuenta == tid:
-            # Extraer nombre (caracteres 5-24, dejamos intacto)
             nombre = linea[5:25].rstrip()
             saldo_actual = int(linea[25:34]) if len(linea) >= 34 else 0
             nuevo_saldo = saldo_actual - monto
-            # Reconstruir línea con formato exacto: 5 ID + 20 nombre + 7 saldo
             nombre_just = nombre.ljust(20)[:20]
             linea = f"{tid}{nombre_just}{nuevo_saldo:09d}"
             print(f"[BRIDGE] Saldo actualizado: {saldo_actual} -> {nuevo_saldo}")
@@ -66,14 +67,18 @@ def procesar_archivo(path: Path):
         traceback.print_exc()
     else:
         # Solo mover si no hubo excepción
-        shutil.move(str(path), str(PROCESSED / path.name))
+        if PROCESSED.exists() or PROCESSED.mkdir(parents=True, exist_ok=True):
+            shutil.move(str(path), str(PROCESSED / path.name))
 
-INBOX.mkdir(exist_ok=True)
-PROCESSED.mkdir(exist_ok=True)
-print(f"[BRIDGE] Buscando transacciones en {INBOX} ...")
+def main_loop():
+    INBOX.mkdir(parents=True, exist_ok=True)
+    PROCESSED.mkdir(parents=True, exist_ok=True)
+    print(f"[BRIDGE] Buscando transacciones en {INBOX} ...")
+    while True:
+        archivos = sorted(INBOX.glob("tx-*.json"))
+        for archivo in archivos:
+            procesar_archivo(archivo)
+        time.sleep(1)
 
-while True:
-    archivos = sorted(INBOX.glob("tx-*.json"))
-    for archivo in archivos:
-        procesar_archivo(archivo)
-    time.sleep(1)
+if __name__ == "__main__":
+    main_loop()
