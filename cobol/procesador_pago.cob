@@ -1,52 +1,71 @@
        IDENTIFICATION DIVISION.
        PROGRAM-ID. PROCESADOR.
        ENVIRONMENT DIVISION.
+       CONFIGURATION SECTION.
        INPUT-OUTPUT SECTION.
        FILE-CONTROL.
-           SELECT ACCOUNTS-FILE ASSIGN TO DYNAMIC WS-ACCOUNTS-PATH
+           SELECT ACCOUNTS-FILE
+               ASSIGN TO DYNAMIC WS-ACCOUNTS-PATH
                ORGANIZATION IS LINE SEQUENTIAL
-               ORGANIZATION IS LINE SEQUENTIAL.
-           SELECT INPUT-FILE ASSIGN TO '/app/trans_input.txt'
-               ORGANIZATION IS LINE SEQUENTIAL.
+               ACCESS MODE IS SEQUENTIAL
+               FILE STATUS IS WS-FILE-STATUS.
+           SELECT TRANS-FILE
+               ASSIGN TO DYNAMIC WS-TRANS-PATH
+               ORGANIZATION IS LINE SEQUENTIAL
+               ACCESS MODE IS SEQUENTIAL
+               FILE STATUS IS WS-TRANS-STATUS.
        DATA DIVISION.
        FILE SECTION.
        FD  ACCOUNTS-FILE.
-       01  ACCOUNT-RECORD.
-           05  ACC-ID      PIC 9(5).
-           05  ACC-NAME    PIC X(20).
-           05  ACC-BALANCE PIC 9(7)V99.
-       FD  INPUT-FILE.
-       01  INPUT-RECORD.
-           05  IN-ID       PIC 9(5).
-           05 FILLER       PIC X.
-           05  IN-AMT      PIC 9(7)V99.
+       01  ACCOUNTS-RECORD.
+           05 AC-ID             PIC X(5).
+           05 AC-NOMBRE         PIC X(20).
+           05 AC-SALDO          PIC 9(9).
+       FD  TRANS-FILE.
+       01  TRANS-RECORD.
+           05 TR-ID             PIC X(5).
+           05 FILLER            PIC X(1).
+           05 TR-MONTO          PIC 9(9).
        WORKING-STORAGE SECTION.
-        01 WS-ACCOUNTS-PATH     PIC X(200).
-       01  WS-FOUND        PIC X.
-       01  WS-NEW-BALANCE  PIC 9(7)V99.
-       01  WS-TEMP-RECORD  PIC X(32).
+       01  WS-ACCOUNTS-PATH     PIC X(200).
+       01  WS-TRANS-PATH        PIC X(200).
+       01  WS-FILE-STATUS       PIC XX.
+       01  WS-TRANS-STATUS      PIC XX.
+       01  WS-TEMP-RECORD       PIC X(32).
+       01  WS-FOUND             PIC X VALUE 'N'.
+       01  WS-EOF               PIC X VALUE 'N'.
+       01  WS-NEW-BALANCE       PIC 9(9).
        PROCEDURE DIVISION.
+       MAIN-PARA.
            MOVE SPACES TO WS-ACCOUNTS-PATH
            ACCEPT WS-ACCOUNTS-PATH FROM ENVIRONMENT "ACCOUNTS_PATH"
            IF WS-ACCOUNTS-PATH = SPACES
                MOVE "/app/accounts/ACCOUNTS.DAT" TO WS-ACCOUNTS-PATH
-           END-IF.
-           OPEN INPUT INPUT-FILE
-           READ INPUT-FILE
-           CLOSE INPUT-FILE
+           END-IF
+           MOVE SPACES TO WS-TRANS-PATH
+           ACCEPT WS-TRANS-PATH FROM ENVIRONMENT "TRANS_INPUT"
+           IF WS-TRANS-PATH = SPACES
+               MOVE "/app/trans_input.txt" TO WS-TRANS-PATH
+           END-IF
+           OPEN INPUT TRANS-FILE
+           READ TRANS-FILE INTO TRANS-RECORD
+           CLOSE TRANS-FILE
            MOVE 'N' TO WS-FOUND
+           MOVE 'N' TO WS-EOF
            OPEN INPUT ACCOUNTS-FILE
            OPEN OUTPUT ACCOUNTS-FILE
-           PERFORM UNTIL WS-FOUND = 'Y'
+           PERFORM UNTIL WS-EOF = 'Y'
                READ ACCOUNTS-FILE INTO WS-TEMP-RECORD
-                   AT END EXIT PERFORM
+               AT END MOVE 'Y' TO WS-EOF
+               NOT AT END
+                   MOVE WS-TEMP-RECORD TO ACCOUNTS-RECORD
+                   IF AC-ID = TR-ID
+                       MOVE 'Y' TO WS-FOUND
+                       COMPUTE WS-NEW-BALANCE = AC-SALDO - TR-MONTO
+                       MOVE WS-NEW-BALANCE TO AC-SALDO
+                   END-IF
+                   WRITE ACCOUNTS-RECORD
                END-READ
-               IF ACC-ID = IN-ID
-                   COMPUTE WS-NEW-BALANCE = ACC-BALANCE - IN-AMT
-                   MOVE WS-NEW-BALANCE TO ACC-BALANCE
-                   MOVE 'Y' TO WS-FOUND
-               END-IF
-               WRITE ACCOUNT-RECORD
            END-PERFORM
            CLOSE ACCOUNTS-FILE
            DISPLAY "PAGO PROCESADO"
