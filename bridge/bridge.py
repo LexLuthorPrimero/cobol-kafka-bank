@@ -5,6 +5,9 @@ def _get_path(env_var, default):
     return Path(os.environ.get(env_var, default))
 
 def run_cobol(program):
+    env = os.environ.copy()
+    env["ACCOUNTS_PATH"] = os.environ.get("ACCOUNTS_PATH", "/app/accounts/ACCOUNTS.DAT")
+
     cobol_dir = _get_path('COBOL_DIR', '/app')
     env = os.environ.copy()
     # Pasar la ruta del archivo de cuentas al COBOL (si está configurada)
