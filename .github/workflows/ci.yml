@@ -1,7 +1,5 @@
 name: COBOL Bridge CI
-
 on: [push, pull_request]
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -18,27 +16,18 @@ jobs:
           cobc -x -o procesador_pago procesador_pago.cob
           cobc -x -o actualizador_saldo actualizador_saldo.cob
           chmod +x autorizador procesador_pago actualizador_saldo
-      - name: Crear entorno Docker simulado
-        run: |
-          sudo mkdir -p /app/accounts
-          sudo cp accounts/ACCOUNTS.DAT /app/accounts/ACCOUNTS.DAT
-          sudo touch /app/trans_input.txt
       - name: Ejecutar tests COBOL
         run: ./test.sh
-      - name: Instalar Python
-        run: sudo apt-get install -y python3
-      - name: Ejecutar tests Python (con entorno)
+      - name: Ejecutar tests Python
         run: |
           export COBOL_DIR=$(pwd)/cobol
-          export ACCOUNTS_FILE=/app/accounts/ACCOUNTS.DAT
-          export BRIDGE_INPUT_FILE=/app/trans_input.txt
           cd tests
           python3 -m unittest test_bridge.py -v
   linter:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Super-Linter (solo Markdown)
+      - name: Super-Linter (Markdown)
         uses: super-linter/super-linter@v7
         env:
           VALIDATE_ALL_CODEBASE: false
