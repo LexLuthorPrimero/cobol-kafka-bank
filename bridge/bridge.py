@@ -1,27 +1,24 @@
 import os, json, subprocess, time, shutil
 from pathlib import Path
 
-# Rutas configurables por variables de entorno (con defaults para Docker)
-INBOX = Path(os.environ.get('BRIDGE_INBOX', '/app/inbox'))
-PROCESSED = Path(os.environ.get('BRIDGE_PROCESSED', '/app/processed'))
-COBOL_DIR = Path(os.environ.get('COBOL_DIR', '/app'))
-INPUT_FILE = Path(os.environ.get('BRIDGE_INPUT_FILE', '/app/trans_input.txt'))
-ACCOUNTS_FILE = Path(os.environ.get('ACCOUNTS_FILE', '/app/accounts/ACCOUNTS.DAT'))
+def _get_path(env_var, default):
+    return Path(os.environ.get(env_var, default))
 
 def run_cobol(program):
+    cobol_dir = _get_path('COBOL_DIR', '/app')
     return subprocess.run(
-        [str(COBOL_DIR / program)],
-        capture_output=True, text=True, cwd=str(COBOL_DIR)
+        [str(cobol_dir / program)],
+        capture_output=True, text=True, cwd=str(cobol_dir)
     ).stdout.strip()
 
 def actualizar_saldo(tid, monto):
+    accounts = _get_path('ACCOUNTS_FILE', '/app/accounts/ACCOUNTS.DAT')
     try:
-        with open(ACCOUNTS_FILE, 'r') as f:
+        with open(accounts, 'r') as f:
             lineas = f.readlines()
     except FileNotFoundError:
-        print(f"[BRIDGE] ERROR: {ACCOUNTS_FILE} no encontrado")
+        print(f"[BRIDGE] ERROR: {accounts} no encontrado")
         return
-
     nuevas = []
     for linea in lineas:
         linea = linea.rstrip('\r\n')
@@ -34,8 +31,7 @@ def actualizar_saldo(tid, monto):
             linea = f"{tid}{nombre_just}{nuevo_saldo:09d}"
             print(f"[BRIDGE] Saldo actualizado: {saldo_actual} -> {nuevo_saldo}")
         nuevas.append(linea + '\n')
-
-    with open(ACCOUNTS_FILE, 'w') as f:
+    with open(accounts, 'w') as f:
         f.writelines(nuevas)
 
 def procesar_archivo(path: Path):
@@ -46,37 +42,36 @@ def procesar_archivo(path: Path):
         if not tid or not amt:
             print(f"[BRIDGE] Datos incompletos en {path.name}")
             return
-
-        INPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(INPUT_FILE, 'w') as f:
+        input_file = _get_path('BRIDGE_INPUT_FILE', '/app/trans_input.txt')
+        input_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(input_file, 'w') as f:
             f.write(f'{tid} {amt:09d}\n')
-
         print(f"[BRIDGE] Procesando {path.name}: ID={tid} Monto={amt}")
         res = run_cobol('autorizador')
         print(f'Resultado autorizador: {res}')
-
         if res == 'AUTORIZADO':
             actualizar_saldo(tid, amt)
             run_cobol('actualizador_saldo')
             print(f'Transaccion completada para ID {tid}')
         else:
             print(f'Transaccion RECHAZADA para ID {tid}')
-
     except Exception as e:
         print(f"[BRIDGE] Error procesando {path.name}: {e}")
         import traceback
         traceback.print_exc()
     else:
-        PROCESSED.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(path), str(PROCESSED / path.name))
+        processed = _get_path('BRIDGE_PROCESSED', '/app/processed')
+        processed.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(path), str(processed / path.name))
 
 def main_loop():
-    INBOX.mkdir(parents=True, exist_ok=True)
-    PROCESSED.mkdir(parents=True, exist_ok=True)
-    print(f"[BRIDGE] Buscando transacciones en {INBOX} ...")
+    inbox = _get_path('BRIDGE_INBOX', '/app/inbox')
+    processed = _get_path('BRIDGE_PROCESSED', '/app/processed')
+    inbox.mkdir(parents=True, exist_ok=True)
+    processed.mkdir(parents=True, exist_ok=True)
+    print(f"[BRIDGE] Buscando transacciones en {inbox} ...")
     while True:
-        archivos = sorted(INBOX.glob("tx-*.json"))
-        for archivo in archivos:
+        for archivo in sorted(inbox.glob("tx-*.json")):
             procesar_archivo(archivo)
         time.sleep(1)
 

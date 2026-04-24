@@ -1,16 +1,12 @@
 name: COBOL Bridge CI
-
 on: [push, pull_request]
-
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Instalar GnuCOBOL
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gnucobol
+        run: sudo apt-get update && sudo apt-get install -y gnucobol
       - name: Compilar COBOL
         run: |
           cd cobol
@@ -18,9 +14,9 @@ jobs:
           cobc -x -o procesador_pago procesador_pago.cob
           cobc -x -o actualizador_saldo actualizador_saldo.cob
           chmod +x autorizador procesador_pago actualizador_saldo
-      - name: Ejecutar tests COBOL
+      - name: Tests COBOL
         run: ./test.sh
-      - name: Ejecutar tests Python
+      - name: Tests Python
         run: |
           export COBOL_DIR=$(pwd)/cobol
           cd tests
@@ -29,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Super-Linter (Markdown)
+      - name: Super-Linter
         uses: super-linter/super-linter@v7
         env:
           VALIDATE_ALL_CODEBASE: false
