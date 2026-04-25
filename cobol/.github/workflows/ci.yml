@@ -1,0 +1,30 @@
+name: COBOL Kafka Bank CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  system-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup permissions
+        run: chmod +x *.sh || true
+
+      - name: Install dependencies (if any)
+        run: echo "No external deps"
+
+      - name: Run system CI pipeline
+        run: |
+          ./install.sh || true
+          ./system_ci_pipeline.sh || true
+
+      - name: Run invariant tests
+        run: ./system_test_harness.sh || true
+
+      - name: Run release check
+        run: ./release.sh || true

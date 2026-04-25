@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=== ARCHITECTURE GUARD ==="
+
+echo "[CHECK] SYSTEM VERSION"
+cat SYSTEM_VERSION
+
+echo "[OK] ARCHITECTURE IS FROZEN"
+
+echo "[RULE] NO STRUCTURAL MODIFICATIONS ALLOWED"

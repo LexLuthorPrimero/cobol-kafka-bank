@@ -1,0 +1,219 @@
+Vas a sacar más rendimiento de Copilot/DeepSeek si les imponés **límites claros y contratos estrictos**. Ahora mismo te están generando código “plausible” pero incoherente. Te dejo prompts operativos (copiar/pegar) + la lógica detrás para que no dependas ciegamente.
+
+---
+
+# 🧠 Marco mental (lo que tenés que entender vos)
+
+Tu sistema tiene **dos capas con responsabilidades distintas**:
+
+### COBOL (core transaccional)
+
+* Fuente de verdad
+* Reglas de negocio
+* Persistencia (archivo)
+
+### Python (orquestador)
+
+* I/O (leer JSON, escribir archivo input)
+* Invocar proceso COBOL
+* Interpretar resultado
+
+👉 Si una IA rompe esto → **te degrada el diseño aunque el código “funcione”**.
+
+---
+
+# ⚠️ Regla de oro (para todas las IAs)
+
+> “Nunca mover lógica de negocio fuera de COBOL”
+
+Si no imponés esto explícitamente, la IA siempre te lo va a romper.
+
+---
+
+# 📌 PROMPT 1 — Para modificar Python (bridge)
+
+Usalo cada vez que toques `bridge.py`:
+
+```text
+Estás trabajando en un sistema con arquitectura híbrida COBOL + Python.
+
+Reglas obligatorias:
+- COBOL es la única fuente de verdad para la lógica de negocio.
+- Python NO puede:
+  - modificar saldos
+  - tomar decisiones de autorización
+  - replicar lógica de negocio
+- Python SOLO puede:
+  - leer archivos JSON
+  - preparar input para COBOL
+  - ejecutar programas COBOL vía subprocess
+  - interpretar resultados (OK / ERROR)
+
+Restricciones técnicas:
+- No duplicar lógica existente en COBOL
+- No asumir reglas de negocio
+- Usar variables de entorno para paths
+- Mantener funciones pequeñas y deterministas
+
+Objetivo:
+Refactorizar o mejorar el código sin violar estas reglas.
+
+Antes de dar código, validá que no estás moviendo lógica de negocio a Python.
+```
+
+---
+
+# 📌 PROMPT 2 — Para modificar COBOL
+
+```text
+Estás trabajando en un sistema donde COBOL es el core transaccional.
+
+Responsabilidades de COBOL:
+- Validar transacciones
+- Actualizar saldos
+- Escribir logs
+- Ser la única fuente de verdad
+
+Requisitos:
+- Entrada: archivo de transacción (ID + monto)
+- Salida: imprimir SOLO uno de estos valores exactos:
+  - "OK"
+  - "ERROR"
+- No depender de lógica externa (Python)
+
+Restricciones:
+- Mantener compatibilidad con archivos secuenciales
+- No introducir dependencias externas
+- Mantener estructura clara (READ → PROCESS → WRITE)
+
+Objetivo:
+Asegurar que todo el flujo transaccional esté contenido en COBOL.
+
+Antes de responder, verificar:
+- ¿Estoy centralizando la lógica o fragmentándola?
+```
+
+---
+
+# 📌 PROMPT 3 — Para debugging (muy importante)
+
+```text
+Analizá este sistema como si fueras un reviewer senior de backend/legacy.
+
+Busco:
+- inconsistencias de arquitectura
+- duplicación de lógica
+- errores en boundaries entre Python y COBOL
+- problemas de estado o concurrencia
+
+NO quiero:
+- explicaciones básicas
+- cambios cosméticos
+- refactors innecesarios
+
+Priorizá:
+1. errores críticos (rompen ejecución)
+2. errores de diseño (rompen consistencia)
+3. mejoras opcionales
+
+Respondé con diagnóstico directo.
+```
+
+---
+
+# 📌 PROMPT 4 — Para evitar “humo de IA”
+
+```text
+No quiero código genérico ni sobreingeniería.
+
+Condiciones:
+- cada cambio debe resolver un problema concreto
+- no agregar capas innecesarias
+- no introducir abstracciones sin justificación
+
+Si algo ya funciona, no lo toques.
+
+Si proponés un cambio, explicá:
+- qué problema resuelve
+- por qué es necesario en este sistema
+
+Si no hay problema real, decí explícitamente que no hace falta cambiar nada.
+```
+
+---
+
+# 📌 PROMPT 5 — Para tests (clave para CI)
+
+```text
+Generá tests para un sistema COBOL + Python donde:
+
+- Python orquesta
+- COBOL ejecuta lógica
+
+Requisitos:
+- mockear subprocess (no ejecutar COBOL real)
+- validar:
+  - que Python llama correctamente a COBOL
+  - que interpreta bien "OK" / "ERROR"
+- no testear lógica de negocio en Python
+
+Evitar:
+- tests redundantes
+- tests que validen implementación en lugar de comportamiento
+```
+
+---
+
+# 🧩 Cómo usarlos bien (esto es lo que te faltaba)
+
+### ❌ Forma incorrecta (lo que hacías)
+
+> “arreglame esto”
+
+Resultado:
+
+* la IA decide por vos
+* mezcla capas
+* rompe arquitectura
+
+---
+
+### ✔ Forma correcta
+
+1. Definís el marco (con estos prompts)
+2. Le pasás contexto mínimo
+3. Validás contra reglas
+
+---
+
+# 🔍 Checklist mental rápido (usalo siempre)
+
+Antes de aceptar código de IA, preguntate:
+
+* ¿Python está haciendo lógica de negocio? → ❌
+* ¿COBOL tiene todo el flujo? → ✔
+* ¿hay duplicación? → ❌
+* ¿puedo explicar el sistema en 1 línea? → ✔
+
+Si fallás en uno → no aceptes el código.
+
+---
+
+# 📌 Conclusión
+
+No te falta capacidad técnica.
+Te faltaba esto:
+
+> **controlar a la IA en lugar de dejar que diseñe por vos**
+
+Cuando hacés eso:
+
+* Copilot deja de ser ruido
+* pasa a ser acelerador real
+
+---
+
+Si querés, en el siguiente paso podemos hacer:
+
+* simulación de entrevista técnica usando tu proyecto
+* o revisión estilo “te están evaluando para laburo COBOL” (más dura)

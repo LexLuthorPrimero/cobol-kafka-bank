@@ -1,0 +1,75 @@
+name: COBOL Bridge CI
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar GnuCOBOL
+        run: sudo apt-get install -y gnucobol
+
+      - name: Verificar columnas COBOL
+        run: |
+          python3 -c "
+          import sys, pathlib
+          errores = []
+          for f in pathlib.Path('cobol').glob('*.cob'):
+              for i, line in enumerate(f.read_text().splitlines(), 1):
+                  if len(line) >= 7 and line[6] not in (' ','*','/','-','D'):
+                      errores.append(f'{f}:{i}: col7={repr(line[6])}')
+          if errores:
+              print('Errores de columnas COBOL:')
+              [print(e) for e in errores]
+              sys.exit(1)
+          print('OK - columnas COBOL correctas')
+          "
+
+      - name: Compilar COBOL
+        run: |
+          cd cobol
+          cobc -x -o autorizador autorizador.cob
+          cobc -x -o procesador_pago procesador_pago.cob
+          cobc -x -o actualizador_saldo actualizador_saldo.cob
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias Python
+        run: pip install flake8; test -f bridge/requirements.txt && pip install -r bridge/requirements.txt || true
+
+      - name: Lint Python (solo errores reales)
+        run: |
+          flake8 bridge/bridge.py tests/ \
+            --select=E9,F401,F811,F821,F841 \
+            --max-line-length=120
+
+      - name: Tests
+        run: |
+          export COBOL_DIR=$(pwd)/cobol
+          cd tests
+          python3 -m unittest test_bridge.py -v
+
+  lint-opcional:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Dockerfile
+        run: |
+          docker run --rm -i hadolint/hadolint < bridge/Dockerfile \
+            --ignore DL3008 \
+            --ignore DL3009 \
+            || true
+
+      - name: Lint Markdown
+        run: |
+          npx --yes markdownlint-cli "**/*.md" \
+            --ignore node_modules \
+            --config .markdownlint.json \
+            || true

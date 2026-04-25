@@ -1,0 +1,15 @@
+services:
+  bridge:
+    build:
+      context: .
+      dockerfile: bridge/Dockerfile
+    environment:
+      COBOL_DIR: /app/cobol
+      ACCOUNTS_FILE: "/app/accounts/ACCOUNTS.DAT"
+    volumes:
+      - ./inbox:/app/inbox
+      - ./processed:/app/processed
+      - ./accounts:/app/accounts
+    working_dir: /app
+    stdin_open: true
+    tty: true

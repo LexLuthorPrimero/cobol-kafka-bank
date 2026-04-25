@@ -1,0 +1,11 @@
+timestamp=1777061345
+accounts_size=1
+trans_present=1
+
+[RUN]
+=== MULTI ACCOUNT MODE ===
+OK -> 00001
+FIN OK
+
+[STATE]
+00001JUAN               0000099910
