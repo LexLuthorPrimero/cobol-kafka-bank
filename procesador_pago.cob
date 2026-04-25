@@ -6,11 +6,11 @@
 
        01 WS-TABLE-IN.
            05 WS-ITEM OCCURS 100 TIMES.
-              10 WS-VALUE PIC 9(5) VALUE 0.
+               10 WS-VALUE PIC 9(5) VALUE 0.
 
-       01 WS-INDEX PIC 9(5) VALUE 0.
+       01 WS-INDEX      PIC 9(5) VALUE 0.
        01 WS-TABLE-INDE PIC 9(5) VALUE 0.
-       01 WS-MSG PIC X(50) VALUE SPACES.
+       01 WS-MSG        PIC X(50) VALUE SPACES.
 
        PROCEDURE DIVISION.
 
