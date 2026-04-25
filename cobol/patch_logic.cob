@@ -12,13 +12,13 @@
 
        01 WS-ID-TABLE.
            05 W-ID     OCCURS 10 TIMES PIC X(5)
-               VALUE "00001".
+               VALUE "001970000".
 
        01 WS-SALDO-TABLE.
            05 W-SALDO  OCCURS 10 TIMES PIC 9(9)
                VALUE 10000.
 
-       01 T-ID     PIC X(5) VALUE "00001".
+       01 T-ID     PIC X(5) VALUE "001970000".
        01 T-AMT    PIC 9(9) VALUE 70.
 
        01 J-TXT    PIC X(80).
